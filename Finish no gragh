@@ -1,0 +1,454 @@
+import os  # ใช้สำหรับการทำงานกับระบบปฏิบัติการ เช่น การจัดการไฟล์หรือโฟลเดอร์
+import random  # ใช้สำหรับการสุ่ม เช่น การสุ่มข้อมูลจากลิสต์
+import math  # ใช้สำหรับฟังก์ชันทางคณิตศาสตร์ เช่น การคำนวณพลังงาน (exponential function) หรือฟังก์ชันคณิตศาสตร์อื่นๆ
+
+# ------------------ Functions ------------------ #
+def sig_func(x):  # ฟังก์ชัน sigmoid ใช้ในการแปลงค่าอินพุตให้อยู่ในช่วง 0 ถึง 1
+    return 1.0 / (1.0 + math.exp(-max(min(x, 20), -20)))  # ใช้สูตร sigmoid โดยจำกัดค่า x ให้อยู่ในช่วง -20 ถึง 20 เพื่อหลีกเลี่ยงค่าผิดปกติ
+
+def sig_der_func(output):  # ฟังก์ชันหาค่าอนุพันธ์ของ sigmoid
+    return output * (1.0 - output)  # ใช้สูตรอนุพันธ์ของ sigmoid ที่คำนวณจาก output ที่ได้จาก sig_func
+
+
+# ------------------ Flood Level ------------------ #
+def data_from_file(file_path):
+    data = []  # สร้างลิสต์เพื่อเก็บข้อมูลที่อ่านจากไฟล์
+    with open(file_path, "r") as file:  # เปิดไฟล์ในโหมดอ่าน
+        for line in file:  # อ่านทีละบรรทัด
+            line = line.strip()  # ลบช่องว่างก่อนและหลังบรรทัด
+            if line == "":  # ถ้าบรรทัดว่างให้ข้ามไป
+                continue
+            try:
+                values = list(map(float, line.split()))  # แปลงค่าจากสตริงเป็นตัวเลข (float)
+                if len(values) == 9:  # ตรวจสอบว่ามีทั้งหมด 9 ค่าในบรรทัดนั้น
+                    data.append(values)  # เพิ่มข้อมูลที่ได้ลงในลิสต์
+            except ValueError:  # ถ้าแปลงไม่สำเร็จจะข้ามบรรทัดนั้น
+                continue
+    return data  # คืนค่าข้อมูลทั้งหมด
+
+
+def normal_dataset(data):  # ฟังก์ชันนี้ใช้สำหรับการทำ Normalize ข้อมูลอินพุตและเอาต์พุต
+    inputs = [row[:-1] for row in data]  # แยกส่วนอินพุตจากข้อมูลทั้งหมด โดยเอาทุกค่าที่ไม่ใช่ตัวสุดท้าย
+    targets = [row[-1] for row in data]  # แยกส่วนเอาต์พุต (ค่าตัวสุดท้าย) ออกจากข้อมูล
+
+    min_values = [min(column) for column in zip(*inputs)]  # คำนวณค่าต่ำสุดของแต่ละคอลัมน์ในข้อมูลอินพุต
+    max_values = [max(column) for column in zip(*inputs)]  # คำนวณค่าสูงสุดของแต่ละคอลัมน์ในข้อมูลอินพุต
+
+    # ทำการ Normalize ข้อมูลอินพุตให้อยู่ในช่วง 0 ถึง 1
+    normal_inputs = [
+        [(value - min_values[i]) / (max_values[i] - min_values[i] if max_values[i] != min_values[i] else 1)  # การ Normalize จะถูกคำนวณด้วยการลบค่าต่ำสุดและหารด้วยช่วง (max - min)
+         for i, value in enumerate(row)]  # ใช้ enumerate เพื่อเข้าถึงค่าและดัชนีของแต่ละคอลัมน์ในแต่ละแถว
+        for row in inputs  # ทำซ้ำในแต่ละแถวของข้อมูลอินพุต
+    ]
+
+    target_min = min(targets)  # คำนวณค่าต่ำสุดของข้อมูลเอาต์พุต
+    target_max = max(targets)  # คำนวณค่าสูงสุดของข้อมูลเอาต์พุต
+    target_range = target_max - target_min if target_max != target_min else 1  # คำนวณช่วงของข้อมูลเอาต์พุต
+    normal_targets = [(value - target_min) / target_range for value in targets]  # ทำการ Normalize เอาต์พุตให้ค่าทุกตัวอยู่ในช่วง 0 ถึง 1
+
+    # คืนค่าเป็นลิสต์ที่ประกอบไปด้วยข้อมูลอินพุตที่ Normalize แล้วและข้อมูลเอาต์พุตที่ Normalize แล้ว
+    return [normal_inputs[i] + [normal_targets[i]] for i in range(len(data))], (target_min, target_max, target_range)
+
+
+class MultiLayerPerceptronFlood:  # สร้างคลาส MultiLayerPerceptronFlood ซึ่งเป็นโมเดล neural network แบบหลายชั้น
+    def __init__(self, input_units=8, hidden_units=5, output_units=1):  # กำหนดตัวแปรเริ่มต้นของโมเดล
+        self.learning_rate = 0.01  # อัตราการเรียนรู้ (learning rate)
+        self.momentum = 0.9  # โมเมนตัม (momentum) ใช้ในการอัพเดตน้ำหนัก
+        self.max_epochs = 1000  # จำนวนรอบสูงสุดในการฝึก
+        self.input_units = input_units  # จำนวนหน่วยในชั้นอินพุต
+        self.hidden_units = hidden_units  # จำนวนหน่วยในชั้นซ่อน
+        self.output_units = output_units  # จำนวนหน่วยในชั้นเอาต์พุต
+        
+        # สร้างน้ำหนัก (weights) และอคติ (biases) ของชั้นอินพุตถึงซ่อน
+        self.weights_input_to_hidden = [[random.uniform(-1, 1) for _ in range(input_units)] 
+                                        for _ in range(hidden_units)]  # สุ่มน้ำหนักระหว่างอินพุตและชั้นซ่อน
+        self.biases_hidden = [random.uniform(-1, 1) for _ in range(hidden_units)]  # สุ่มอคติในชั้นซ่อน
+        
+        # สร้างน้ำหนัก (weights) และอคติ (biases) ของชั้นซ่อนถึงเอาต์พุต
+        self.weights_hidden_to_output = [[random.uniform(-1, 1) for _ in range(hidden_units)] 
+                                        for _ in range(output_units)]  # สุ่มน้ำหนักระหว่างชั้นซ่อนและเอาต์พุต
+        self.biases_output = [random.uniform(-1, 1) for _ in range(output_units)]  # สุ่มอคติในชั้นเอาต์พุต
+        
+        # เก็บน้ำหนักและอคติที่ใช้ในโมเมนตัม (Momentum) เพื่อการอัพเดตในอนาคต
+        self.prev_weights_input_to_hidden = [[0.0 for _ in range(input_units)] for _ in range(hidden_units)]  # น้ำหนักในชั้นอินพุตถึงซ่อนจากรอบก่อน
+        self.prev_weights_hidden_to_output = [[0.0 for _ in range(hidden_units)] for _ in range(output_units)]  # น้ำหนักในชั้นซ่อนถึงเอาต์พุตจากรอบก่อน
+        self.prev_biases_hidden = [0.0 for _ in range(hidden_units)]  # อคติในชั้นซ่อนจากรอบก่อน
+        self.prev_biases_output = [0.0 for _ in range(output_units)]  # อคติในชั้นเอาต์พุตจากรอบก่อน
+        
+        # เริ่มต้นค่าผลลัพธ์ของชั้นซ่อนเป็น None
+        self.hidden_layer_output = None
+
+    # ฟังก์ชันการเดินไปข้างหน้า (Forward pass)
+    def for_pass(self, inputs):  # รับอินพุตและคำนวณผลลัพธ์ของแต่ละชั้น
+        # คำนวณค่าอินพุตของชั้นซ่อน
+        hidden_layer_input = [sum(self.weights_input_to_hidden[i][j] * inputs[j] for j in range(self.input_units)) + self.biases_hidden[i] 
+                              for i in range(self.hidden_units)]
+        self.hidden_layer_output = [sig_func(z) for z in hidden_layer_input]  # เก็บผลลัพธ์จากชั้นซ่อนหลังจากผ่าน sigmoid
+        # คำนวณค่าอินพุตของชั้นเอาต์พุต
+        output_layer_input = [sum(self.weights_hidden_to_output[k][i] * self.hidden_layer_output[i] for i in range(self.hidden_units)) + self.biases_output[k] 
+                              for k in range(self.output_units)]
+        # คำนวณผลลัพธ์ของชั้นเอาต์พุต
+        output_layer_output = [sig_func(z) for z in output_layer_input]
+        return output_layer_output[0]  # คืนค่าผลลัพธ์สุดท้ายจากชั้นเอาต์พุต
+
+    # ฟังก์ชันการย้อนกลับ (Backward pass) เพื่อปรับน้ำหนัก
+    def back_pass(self, inputs, true_output, predicted_output):  # รับอินพุต ค่าจริง และค่าที่ทำนายจาก forward pass
+        error = predicted_output - true_output  # คำนวณค่าผิดพลาด (Error)
+        
+        delta_output = [error]  # คำนวณการเปลี่ยนแปลงในชั้นเอาต์พุต
+        
+        # คำนวณการเปลี่ยนแปลงในชั้นซ่อน โดยการใช้ผลลัพธ์ที่ได้จาก forward pass และอนุพันธ์ของ sigmoid
+        delta_hidden = [
+            sum(delta_output[k] * self.weights_hidden_to_output[k][i] for k in range(self.output_units)) * 
+            sig_der_func(self.hidden_layer_output[i]) 
+            for i in range(self.hidden_units)
+        ]
+        
+        # อัพเดตน้ำหนักและอคติในชั้นซ่อนถึงเอาต์พุต
+        for k in range(self.output_units):
+            for i in range(self.hidden_units):
+                weight_update = delta_output[k] * self.hidden_layer_output[i]  # คำนวณการอัพเดตน้ำหนัก
+                self.weights_hidden_to_output[k][i] -= self.learning_rate * weight_update + self.momentum * self.prev_weights_hidden_to_output[k][i]
+                self.prev_weights_hidden_to_output[k][i] = weight_update  # เก็บน้ำหนักที่อัพเดตในรอบถัดไป
+            self.biases_output[k] -= self.learning_rate * delta_output[k] + self.momentum * self.prev_biases_output[k]  # อัพเดตอคติ
+            self.prev_biases_output[k] = delta_output[k]  # เก็บอคติที่อัพเดตในรอบถัดไป
+        
+        # อัพเดตน้ำหนักและอคติในชั้นอินพุตถึงซ่อน
+        for i in range(self.hidden_units):
+            for j in range(self.input_units):
+                weight_update = delta_hidden[i] * inputs[j]  # คำนวณการอัพเดตน้ำหนัก
+                self.weights_input_to_hidden[i][j] -= self.learning_rate * weight_update + self.momentum * self.prev_weights_input_to_hidden[i][j]
+                self.prev_weights_input_to_hidden[i][j] = weight_update  # เก็บน้ำหนักที่อัพเดตในรอบถัดไป
+            self.biases_hidden[i] -= self.learning_rate * delta_hidden[i] + self.momentum * self.prev_biases_hidden[i]  # อัพเดตอคติ
+            self.prev_biases_hidden[i] = delta_hidden[i]  # เก็บอคติที่อัพเดตในรอบถัดไป
+        
+        return error ** 2  # คืนค่าความผิดพลาดที่ยกกำลังสอง (ใช้ในการคำนวณค่าเสียหาย)
+
+def cross_validation(data, k=10, hidden_units=5, learning_rate=0.01, momentum=0.9):  # ฟังก์ชัน Cross-validation ที่ใช้แบ่งข้อมูลเป็น k-fold
+    fold_size = len(data) // k  # คำนวณขนาดของแต่ละ fold (จำนวนข้อมูลในแต่ละชุดทดสอบ)
+    random.shuffle(data)  # สุ่มข้อมูลก่อนเพื่อให้การแบ่งข้อมูลเป็นธรรมชาติ
+    mean_squared_error_scores = []  # ลิสต์เพื่อเก็บค่า Mean Squared Error (MSE) ของแต่ละ fold
+    
+    for i in range(k):  # ทำการฝึกและทดสอบโมเดล k รอบ
+        validation_data = data[i*fold_size : (i+1)*fold_size]  # ข้อมูลที่ใช้ทดสอบใน fold ปัจจุบัน
+        training_data = data[:i*fold_size] + data[(i+1)*fold_size:]  # ข้อมูลที่ใช้ฝึกโมเดลใน fold ปัจจุบัน
+        
+        mlp = MultiLayerPerceptronFlood(hidden_units=hidden_units)  # สร้างโมเดล MLP
+        mlp.learning_rate = learning_rate  # กำหนดอัตราการเรียนรู้
+        mlp.momentum = momentum  # กำหนดโมเมนตัม
+
+        # Phase การฝึก (Training Phase)
+        for epoch in range(mlp.max_epochs):  # ทำการฝึกโมเดลจนกว่าจะถึงจำนวนรอบสูงสุดหรือค่าความผิดพลาดต่ำพอ
+            TotalError = 0  # ตัวแปรเก็บค่าความผิดพลาดทั้งหมดในการฝึกแต่ละรอบ
+            random.shuffle(training_data)  # สุ่มข้อมูลการฝึกเพื่อป้องกันความเอนเอียง
+            for sample in training_data:  # ใช้ข้อมูลการฝึกทีละตัวอย่าง
+                inputs = sample[:-1]  # ข้อมูลอินพุต
+                true_output = sample[-1]  # ข้อมูลเอาต์พุตที่แท้จริง
+                predicted_output = mlp.for_pass(inputs)  # ทำนายผลลัพธ์จากโมเดล
+                error = mlp.back_pass(inputs, true_output, predicted_output)  # คำนวณค่าความผิดพลาดและอัพเดตน้ำหนัก
+                TotalError += error  # บวกค่าความผิดพลาดในการฝึกแต่ละตัวอย่าง
+            if TotalError / len(training_data) < 1e-6:  # ถ้าความผิดพลาดเฉลี่ยต่ำกว่าเกณฑ์ที่กำหนด (1e-6) ให้หยุดฝึก
+                break
+
+        # Phase การทดสอบ (Validation Phase)
+        total_mse = 0  # ตัวแปรเก็บค่า Mean Squared Error (MSE) ทั้งหมด
+        for sample in validation_data:  # ใช้ข้อมูลทดสอบในแต่ละ fold
+            inputs = sample[:-1]  # ข้อมูลอินพุต
+            true_output = sample[-1]  # ข้อมูลเอาต์พุตที่แท้จริง
+            predicted_output = mlp.for_pass(inputs)  # ทำนายผลลัพธ์จากโมเดล
+            total_mse += (true_output - predicted_output)**2  # คำนวณความผิดพลาดที่ยกกำลังสอง
+
+        mse = total_mse / len(validation_data)  # คำนวณค่า MSE เฉลี่ยในชุดทดสอบ
+        mean_squared_error_scores.append(mse)  # เก็บ MSE ของแต่ละ fold
+        print()
+        print(f"Fold: {i+1}  MSE: {mse:.6f}", end="  ")  # แสดงผล MSE ของ fold ปัจจุบัน
+        
+    avg_mse = sum(mean_squared_error_scores) / len(mean_squared_error_scores)  # คำนวณค่า MSE เฉลี่ยจากทั้งหมด
+    print(f"\n\nAVG MSE: {avg_mse:.6f} ")  # แสดงค่า MSE เฉลี่ยจาก k-fold
+    print(f"\n-----------------------------------------------------------------")  # แสดงเส้นแบ่ง
+
+# ------------------ Classification ------------------ #
+def load_data(file_path):  # ฟังก์ชันนี้ใช้ในการโหลดข้อมูลจากไฟล์และแปลงเป็นลิสต์ของข้อมูล
+    data = []  # สร้างลิสต์เพื่อเก็บข้อมูลที่ถูกโหลดจากไฟล์
+    with open(file_path, "r") as f:  # เปิดไฟล์ในโหมดอ่าน
+        while True:  # ใช้ลูปเพื่ออ่านไฟล์ทีละบรรทัด
+            line = f.readline().strip()  # อ่านแต่ละบรรทัดและลบช่องว่างที่ไม่จำเป็น
+            if not line:  # ถ้าบรรทัดว่าง (ถึงจุดสิ้นสุดของไฟล์) ให้หยุดลูป
+                break
+            if line.startswith("p"):  # ถ้าบรรทัดเริ่มต้นด้วยตัวอักษร "p"
+                features = list(map(float, f.readline().strip().split()))  # อ่านบรรทัดถัดไปที่เป็นข้อมูลคุณลักษณะ (features) แล้วแปลงเป็นตัวเลข float
+                labels = list(map(int, f.readline().strip().split()))  # อ่านบรรทัดถัดไปที่เป็นป้ายกำกับ (labels) แล้วแปลงเป็นตัวเลข int
+                true_class = 0 if labels[0] == 1 else 1  # กำหนดค่าของ true_class โดยการตรวจสอบว่า label ตัวแรกเป็น 1 หรือไม่
+                data.append(features + [true_class])  # เพิ่มข้อมูล (คุณลักษณะ + true_class) ลงในลิสต์
+    return data  # คืนค่าข้อมูลทั้งหมดที่ถูกโหลดจากไฟล์
+
+
+def data_confusion_matrix(y_true, y_pred):  # ฟังก์ชันนี้ใช้ในการคำนวณ confusion matrix
+    true_positive = true_negative = false_positive = false_negative = 0  # กำหนดตัวแปรเริ่มต้นสำหรับ true positives, true negatives, false positives และ false negatives
+    for t, p in zip(y_true, y_pred):  # ใช้ zip เพื่อจับคู่ค่าจาก y_true (ค่าจริง) และ y_pred (ค่าทำนาย)
+        if t == 1 and p == 1:  # ถ้าค่าจริง (t) และค่าทำนาย (p) เป็น 1
+            true_positive += 1  # เพิ่ม true_positive
+        elif t == 0 and p == 0:  # ถ้าค่าจริง (t) และค่าทำนาย (p) เป็น 0
+            true_negative += 1  # เพิ่ม true_negative
+        elif t == 0 and p == 1:  # ถ้าค่าจริง (t) เป็น 0 และค่าทำนาย (p) เป็น 1
+            false_positive += 1  # เพิ่ม false_positive
+        elif t == 1 and p == 0:  # ถ้าค่าจริง (t) เป็น 1 และค่าทำนาย (p) เป็น 0
+            false_negative += 1  # เพิ่ม false_negative
+    # คืนค่าค่า confusion matrix ในรูปของลิสต์ 2x2
+    return [[true_positive, false_negative], [false_positive, true_negative]]
+
+class MultiLayerPerceptronClassification:  # สร้างคลาส MultiLayerPerceptronClassification สำหรับการสร้างโมเดล Neural Network แบบหลายชั้น
+    def __init__(self, input_units=2, hidden_units=5, output_units=1):  # ฟังก์ชันเริ่มต้นที่กำหนดค่าเริ่มต้นให้กับโมเดล
+        self.learning_rate = 0.01  # อัตราการเรียนรู้ (Learning Rate)
+        self.momentum = 0.8  # โมเมนตัม (Momentum) ใช้ในการปรับน้ำหนัก
+        self.max_epochs = 1000  # จำนวนรอบสูงสุดในการฝึก (Maximum epochs)
+        self.input_units = input_units  # จำนวนหน่วยในชั้นอินพุต
+        self.hidden_units = hidden_units  # จำนวนหน่วยในชั้นซ่อน
+        self.output_units = output_units  # จำนวนหน่วยในชั้นเอาต์พุต
+        
+        # การสุ่มน้ำหนักระหว่างชั้นอินพุตและชั้นซ่อน
+        self.weights_input_to_hidden = [[random.uniform(-0.7, 0.7) for _ in range(input_units)] 
+                                        for _ in range(hidden_units)]
+        # การสุ่มอคติในชั้นซ่อน
+        self.biases_hidden = [random.uniform(-0.7, 0.7) for _ in range(hidden_units)]
+        
+        # การสุ่มน้ำหนักระหว่างชั้นซ่อนและชั้นเอาต์พุต
+        self.weights_hidden_to_output = [[random.uniform(-0.7, 0.7) for _ in range(hidden_units)] 
+                                        for _ in range(output_units)]
+        # การสุ่มอคติในชั้นเอาต์พุต
+        self.biases_output = [random.uniform(-0.7, 0.7) for _ in range(output_units)]
+        
+        # การเก็บน้ำหนักและอคติในรอบก่อนหน้า เพื่อใช้ในการอัพเดตด้วย momentum
+        self.prev_weights_input_to_hidden = [[0.0 for _ in range(input_units)] for _ in range(hidden_units)]  # น้ำหนักของอินพุตถึงซ่อนจากรอบก่อน
+        self.prev_weights_hidden_to_output = [[0.0 for _ in range(hidden_units)] for _ in range(output_units)]  # น้ำหนักของซ่อนถึงเอาต์พุตจากรอบก่อน
+        self.prev_biases_hidden = [0.0 for _ in range(hidden_units)]  # อคติในชั้นซ่อนจากรอบก่อน
+        self.prev_biases_output = [0.0 for _ in range(output_units)]  # อคติในชั้นเอาต์พุตจากรอบก่อน
+
+        # เริ่มต้นค่าผลลัพธ์ของชั้นซ่อนเป็น None
+        self.hidden_layer_output = None
+
+    # ฟังก์ชันการเดินไปข้างหน้า (Forward pass) คำนวณผลลัพธ์ของชั้นซ่อนและชั้นเอาต์พุต
+    def for_pass(self, inputs):
+        # คำนวณค่าผลลัพธ์จากอินพุตในชั้นซ่อน
+        hidden_layer_input = [sum(self.weights_input_to_hidden[i][j] * inputs[j] for j in range(self.input_units)) + self.biases_hidden[i] 
+                              for i in range(self.hidden_units)]
+        hidden_layer_output = [sig_func(z) for z in hidden_layer_input]  # ใช้ฟังก์ชัน sigmoid ในการคำนวณผลลัพธ์จากชั้นซ่อน
+        self.hidden_layer_output = hidden_layer_output  # เก็บผลลัพธ์จากชั้นซ่อน
+        
+        # คำนวณค่าผลลัพธ์จากอินพุตในชั้นเอาต์พุต
+        output_layer_input = [sum(self.weights_hidden_to_output[k][i] * hidden_layer_output[i] for i in range(self.hidden_units)) + self.biases_output[k] 
+                              for k in range(self.output_units)]
+        output_layer_output = [sig_func(z) for z in output_layer_input]  # ใช้ฟังก์ชัน sigmoid ในการคำนวณผลลัพธ์จากชั้นเอาต์พุต
+        return output_layer_output[0]  # คืนค่าผลลัพธ์สุดท้ายจากชั้นเอาต์พุต
+
+    # ฟังก์ชันการย้อนกลับ (Backward pass) คำนวณการอัพเดตน้ำหนักและอคติ
+    def back_pass(self, inputs, true_output, predicted_output):
+        error = predicted_output - true_output  # คำนวณความผิดพลาด (Error) ระหว่างค่าทำนายและค่าจริง
+        
+        # คำนวณการเปลี่ยนแปลงในชั้นเอาต์พุต
+        delta_output = [error * sig_der_func(predicted_output)]  # ใช้อนุพันธ์ของ sigmoid ในการคำนวณ delta ของเอาต์พุต
+        # คำนวณการเปลี่ยนแปลงในชั้นซ่อน
+        delta_hidden = [
+            sum(delta_output[k] * self.weights_hidden_to_output[k][i] for k in range(self.output_units)) * 
+            sig_der_func(self.hidden_layer_output[i])  # คำนวณ delta ของแต่ละหน่วยในชั้นซ่อน
+            for i in range(self.hidden_units)
+        ]
+        
+        # อัพเดตน้ำหนักและอคติในชั้นซ่อนถึงเอาต์พุต
+        for k in range(self.output_units):  # สำหรับแต่ละหน่วยในชั้นเอาต์พุต
+            for i in range(self.hidden_units):  # สำหรับแต่ละหน่วยในชั้นซ่อน
+                weight_update = delta_output[k] * self.hidden_layer_output[i]  # คำนวณการอัพเดตน้ำหนัก
+                self.weights_hidden_to_output[k][i] -= self.learning_rate * weight_update + self.momentum * self.prev_weights_hidden_to_output[k][i]
+                self.prev_weights_hidden_to_output[k][i] = weight_update  # เก็บน้ำหนักที่อัพเดตในรอบถัดไป
+            self.biases_output[k] -= self.learning_rate * delta_output[k] + self.momentum * self.prev_biases_output[k]  # อัพเดตอคติ
+            self.prev_biases_output[k] = delta_output[k]  # เก็บอคติที่อัพเดตในรอบถัดไป
+        
+        # อัพเดตน้ำหนักและอคติในชั้นอินพุตถึงซ่อน
+        for i in range(self.hidden_units):  # สำหรับแต่ละหน่วยในชั้นซ่อน
+            for j in range(self.input_units):  # สำหรับแต่ละหน่วยในชั้นอินพุต
+                weight_update = delta_hidden[i] * inputs[j]  # คำนวณการอัพเดตน้ำหนัก
+                self.weights_input_to_hidden[i][j] -= self.learning_rate * weight_update + self.momentum * self.prev_weights_input_to_hidden[i][j]
+                self.prev_weights_input_to_hidden[i][j] = weight_update  # เก็บน้ำหนักที่อัพเดตในรอบถัดไป
+            self.biases_hidden[i] -= self.learning_rate * delta_hidden[i] + self.momentum * self.prev_biases_hidden[i]  # อัพเดตอคติ
+            self.prev_biases_hidden[i] = delta_hidden[i]  # เก็บอคติที่อัพเดตในรอบถัดไป
+        
+        return error ** 2  # คืนค่าความผิดพลาดที่ยกกำลังสอง (ใช้ในการคำนวณค่าเสียหาย)
+
+
+def classification_validation(data, k=10, hidden_units=4, learning_rate=0.01, momentum=0.9):  # ฟังก์ชันสำหรับทำ k-fold cross-validation เพื่อทดสอบโมเดล
+    if not data:  # ถ้าข้อมูลไม่มี (empty), แสดงข้อความแจ้งข้อผิดพลาด
+        print("Error: No data available.")
+        return  # ถ้าข้อมูลไม่ถูกต้องให้หยุดการทำงานของฟังก์ชัน
+
+    k = min(k, len(data))  # คำนวณจำนวน fold ที่จะใช้, ควบคุมไม่ให้มากเกินจำนวนข้อมูล
+    fold_size = len(data) // k  # ขนาดของแต่ละ fold
+    random.shuffle(data)  # สุ่มข้อมูลเพื่อให้การแบ่งข้อมูลเป็นธรรมชาติ
+    all_confusion = []  # สร้างลิสต์เก็บ confusion matrix จากทุก fold
+
+    for i in range(k):  # ทำการฝึกและทดสอบโมเดล k รอบ
+        validation_data = data[i*fold_size : (i+1)*fold_size]  # ข้อมูลสำหรับทดสอบใน fold ปัจจุบัน
+        training_data = data[:i*fold_size] + data[(i+1)*fold_size:]  # ข้อมูลสำหรับฝึกโมเดลใน fold ปัจจุบัน
+
+        mlp = MultiLayerPerceptronClassification(hidden_units=hidden_units)  # สร้างโมเดล MLP สำหรับ classification
+        mlp.learning_rate = learning_rate  # กำหนดอัตราการเรียนรู้
+        mlp.momentum = momentum  # กำหนดค่า momentum
+
+        # Training Phase: ฝึกโมเดลในแต่ละรอบ epoch
+        for epoch in range(mlp.max_epochs):  # ทำการฝึกในจำนวนรอบที่กำหนด (สูงสุด 1000)
+            TotalError = 0  # ตัวแปรสำหรับเก็บค่าความผิดพลาดทั้งหมด
+            random.shuffle(training_data)  # สุ่มข้อมูลฝึก
+            for sample in training_data:  # สำหรับแต่ละตัวอย่างในข้อมูลฝึก
+                inputs = sample[:2]  # แยกข้อมูลอินพุต (ที่ใช้ในการทำนาย)
+                true_output = sample[2]  # ข้อมูลเอาต์พุตที่แท้จริง (label)
+                predicted_output = mlp.for_pass(inputs)  # ทำนายผลลัพธ์จากโมเดล
+                error = mlp.back_pass(inputs, true_output, predicted_output)  # คำนวณการย้อนกลับและอัพเดตน้ำหนัก
+                TotalError += error  # รวมค่าความผิดพลาดในแต่ละรอบ
+            if TotalError / len(training_data) < 1e-6:  # ถ้าความผิดพลาดต่ำกว่าค่าที่กำหนด (เกือบศูนย์) ให้หยุดฝึก
+                break
+
+        y_true, y_pred = [], []  # ลิสต์เก็บค่าความจริง (y_true) และค่าที่ทำนาย (y_pred)
+        for sample in validation_data:  # สำหรับข้อมูลทดสอบใน fold ปัจจุบัน
+            inputs = sample[:2]  # ข้อมูลอินพุต
+            true_class = sample[2]  # คลาสจริงของข้อมูล
+            output = mlp.for_pass(inputs)  # ทำนายผลลัพธ์จากโมเดล
+            predicted_class = 1 if output >= 0.5 else 0  # กำหนดคลาสที่ทำนาย (ถ้า output >= 0.5 จะเป็น 1, ถ้าไม่ใช่เป็น 0)
+            y_true.append(true_class)  # เก็บค่าคลาสจริง
+            y_pred.append(predicted_class)  # เก็บค่าคลาสที่ทำนาย
+
+        confusion_matrix = data_confusion_matrix(y_true, y_pred)  # คำนวณ confusion matrix สำหรับ fold นี้
+        all_confusion.append(confusion_matrix)  # เก็บ confusion matrix
+        # แสดงผล confusion matrix สำหรับ fold นี้
+        print(f"Fold: {i+1} \nConfusion Matrix: True Positive={confusion_matrix[0][0]}, False Negative={confusion_matrix[0][1]}, \n                  False Positive={confusion_matrix[1][0]}, True Negative={confusion_matrix[1][1]}")
+
+    # คำนวณค่า Accuracy เฉลี่ยจากทุก fold
+    avg_ac = sum((cm[0][0] + cm[1][1]) / sum(sum(row) for row in cm) for cm in all_confusion) / len(all_confusion)
+    print(f"\nAVG Accuracy: {avg_ac*100:.2f} % ")  # แสดงค่า Accuracy เฉลี่ย
+    print(f"\n-----------------------------------------------------------------")  # แสดงเส้นแบ่ง
+
+# _______แก้ไขค่า run โปรแกรม________ #
+def run_dataset():  # ฟังก์ชันนี้ใช้ในการทดสอบโมเดลด้วยข้อมูลที่โหลดจากไฟล์ "dataset.txt"
+    print("\nTest Predict Flood level :\n")  # แสดงข้อความเพื่อบอกว่ากำลังทดสอบการทำนายระดับน้ำท่วม
+    raw_data = data_from_file("dataset.txt")  # โหลดข้อมูลจากไฟล์ "dataset.txt"
+    normalized_data, _ = normal_dataset(raw_data)  # ปรับข้อมูล (normalize) และแยกข้อมูลออกเป็นอินพุตและเอาต์พุต
+    cross_validation(normalized_data, k=10, hidden_units=5, learning_rate=0.01, momentum=0.9)  # ทำ k-fold cross-validation โดยใช้ข้อมูลที่ถูก normalize
+
+def run_cross():  # ฟังก์ชันนี้ใช้ในการทดสอบความถูกต้องของเครือข่ายด้วยข้อมูลจากไฟล์ "cross.txt"
+    print("\nTest validity of network :")  # แสดงข้อความเพื่อบอกว่ากำลังทดสอบความถูกต้องของเครือข่าย
+    cross_data = load_data("cross.txt")  # โหลดข้อมูลจากไฟล์ "cross.txt"
+    if not cross_data:  # ถ้าโหลดข้อมูลไม่ได้
+        print("Error: Failed to load cross.txt")  # แสดงข้อความแสดงข้อผิดพลาด
+        return  # หยุดการทำงานของฟังก์ชัน
+
+    # กำหนดค่าคอนฟิกูเรชันต่างๆ สำหรับการทดสอบ
+    configurations = [
+        {"hidden_units": 4, "learning_rate": 0.01, "momentum": 0.7},  # คอนฟิกแรก
+        {"hidden_units": 6, "learning_rate": 0.05, "momentum": 0.7},  # คอนฟิกที่สอง
+    ]
+    
+    # ทำการทดสอบด้วยค่าคอนฟิกูเรชันต่างๆ
+    for config in configurations:  # ลูปสำหรับการทดสอบแต่ละคอนฟิก
+        print(f"\nConfig: hidden_units={config['hidden_units']}, learning_rate={config['learning_rate']}, momentum={config['momentum']}")  # แสดงการตั้งค่าที่กำลังทดสอบ
+        # เรียกใช้ฟังก์ชัน classification_validation โดยใช้ข้อมูล cross_data และค่าคอนฟิกูเรชันที่กำหนด
+        classification_validation(
+            cross_data,
+            k=10,
+            hidden_units=config['hidden_units'],
+            learning_rate=config['learning_rate'],
+            momentum=config['momentum']
+        )
+        
+# ฟังก์ชันที่ให้ผู้ใช้เลือกปรับค่า
+def ask_for_input(prompt, default_value):
+    user_input = input(f"{prompt} (default {default_value}): ")
+    if user_input:
+        try:
+            return float(user_input)
+        except ValueError:
+            print("Invalid input. Using default value.")
+            return default_value
+    return default_value
+
+def ask_for_input(prompt, default_value):
+    # ฟังก์ชันนี้ใช้ถามผู้ใช้และรับค่าจากผู้ใช้ ถ้าไม่มีการกรอก จะใช้ค่าตัวแปรเริ่มต้น
+    user_input = input(f"{prompt} (default {default_value}): ")
+    # ตรวจสอบว่าผู้ใช้กรอกค่าเข้ามาหรือไม่
+    if user_input:
+        try:
+            # หากผู้ใช้กรอกค่ามา, พยายามแปลงเป็น float และคืนค่าที่ได้
+            return float(user_input)
+        except ValueError:
+            # ถ้าไม่สามารถแปลงเป็น float ได้, แสดงข้อความและใช้ค่าตัวแปรเริ่มต้น
+            print("Invalid input. Using default value.")
+            return default_value
+    # หากผู้ใช้ไม่กรอกค่า, จะคืนค่าตัวแปรเริ่มต้น
+    return default_value
+
+def ask_if_change():
+    # ฟังก์ชันนี้ถามผู้ใช้ว่าจะปรับค่าหรือไม่ (y/n)
+    change = input("Do you want to change the settings? (y/n): ").lower()
+    # คืนค่าผลลัพธ์เป็น True ถ้าผู้ใช้ตอบ 'y', และ False ถ้าตอบ 'n'
+    return change == 'y'
+
+def run_dataset():
+    # ฟังก์ชันนี้ทดสอบการทำนายระดับน้ำท่วม
+    print("\nTest Predict Flood level :\n")  
+
+    if ask_if_change():
+        # ถ้าผู้ใช้ต้องการเปลี่ยนค่าพารามิเตอร์, จะถามค่าที่ต้องการจากผู้ใช้
+        k = int(ask_for_input("Enter number of folds for cross-validation (k)", 10))  # จำนวน fold สำหรับ cross-validation
+        hidden_units = int(ask_for_input("Enter number of hidden units", 5))  # จำนวนหน่วย hidden layers
+        learning_rate = ask_for_input("Enter learning rate", 0.01)  # อัตราการเรียนรู้ (learning rate)
+        momentum = ask_for_input("Enter momentum", 0.9)  # ค่ามูลมุม (momentum)
+    else:
+        # ถ้าผู้ใช้ไม่ต้องการเปลี่ยนค่า, จะใช้ค่าพารามิเตอร์เริ่มต้น
+        k = 10  # จำนวน fold เริ่มต้น
+        hidden_units = 5  # จำนวนหน่วย hidden layers เริ่มต้น
+        learning_rate = 0.01  # อัตราการเรียนรู้เริ่มต้น
+        momentum = 0.9  # ค่ามูลมุมเริ่มต้น
+
+    raw_data = data_from_file("dataset.txt")  # โหลดข้อมูลจากไฟล์ 'dataset.txt'
+    normalized_data, _ = normal_dataset(raw_data)  # ทำการ normalize ข้อมูล
+    # เรียกใช้ฟังก์ชัน cross-validation กับข้อมูลที่ normalize แล้ว
+    cross_validation(normalized_data, k=k, hidden_units=hidden_units, learning_rate=learning_rate, momentum=momentum)  
+
+def run_cross():
+    # ฟังก์ชันนี้ทดสอบความถูกต้องของเครือข่าย
+    print("\nTest validity of network :\n")  
+
+    if ask_if_change():
+        # ถ้าผู้ใช้ต้องการเปลี่ยนค่าพารามิเตอร์, จะถามค่าที่ต้องการจากผู้ใช้
+        hidden_units = int(ask_for_input("Enter number of hidden units", 4))  # จำนวนหน่วย hidden layers
+        learning_rate = ask_for_input("Enter learning rate", 0.01)  # อัตราการเรียนรู้ (learning rate)
+        momentum = ask_for_input("Enter momentum", 0.7)  # ค่ามูลมุม (momentum)
+    else:
+        # ถ้าผู้ใช้ไม่ต้องการเปลี่ยนค่า, จะใช้ค่าพารามิเตอร์เริ่มต้น
+        hidden_units = 4  # จำนวนหน่วย hidden layers เริ่มต้น
+        learning_rate = 0.01  # อัตราการเรียนรู้เริ่มต้น
+        momentum = 0.7  # ค่ามูลมุมเริ่มต้น
+    
+    cross_data = load_data("cross.txt")  # โหลดข้อมูลจากไฟล์ 'cross.txt'
+    if not cross_data:  
+        # ถ้าข้อมูลไม่สามารถโหลดได้, ให้แสดงข้อความแสดงข้อผิดพลาด
+        print("Error: Failed to load cross.txt")  
+        return  
+
+    configurations = [
+        # สร้างลิสต์ของการตั้งค่า (ในกรณีนี้มีแค่การตั้งค่าที่ผู้ใช้เลือก)
+        {"hidden_units": hidden_units, "learning_rate": learning_rate, "momentum": momentum},  
+    ]
+    
+    for config in configurations:  
+        # วนลูปผ่านการตั้งค่าต่างๆ และทดสอบกับข้อมูลที่มี
+        print(f"\nConfig: hidden_units={config['hidden_units']}, learning_rate={config['learning_rate']}, momentum={config['momentum']}")  
+        # เรียกใช้ฟังก์ชันทดสอบความถูกต้องของเครือข่ายด้วยการตั้งค่าที่ผู้ใช้เลือก
+        classification_validation(
+            cross_data,
+            k=10,  # จำนวน fold สำหรับ cross-validation
+            hidden_units=config['hidden_units'],  # จำนวนหน่วย hidden layers
+            learning_rate=config['learning_rate'],  # อัตราการเรียนรู้
+            momentum=config['momentum']  # ค่ามูลมุม
+        )
+
+if __name__ == "__main__":  # ถ้าโปรแกรมนี้ถูกเรียกใช้งานโดยตรง (ไม่ใช่การนำเข้า)
+    run_dataset()  # เรียกฟังก์ชัน run_dataset เพื่อทดสอบข้อมูลระดับน้ำท่วม
+    run_cross()  # เรียกฟังก์ชัน run_cross เพื่อทดสอบความถูกต้องของเครือข่าย
