@@ -1,6 +1,6 @@
-import os  # ใช้สำหรับการทำงานกับระบบปฏิบัติการ เช่น การจัดการไฟล์หรือโฟลเดอร์
-import random  # ใช้สำหรับการสุ่ม เช่น การสุ่มข้อมูลจากลิสต์
-import math  # ใช้สำหรับฟังก์ชันทางคณิตศาสตร์ เช่น การคำนวณพลังงาน (exponential function) หรือฟังก์ชันคณิตศาสตร์อื่นๆ
+import os  # ใช้สำหรับการทำงานกับระบบปฏิบัติการ 
+import random  # ใช้สำหรับการสุ่ม
+import math  # ใช้สำหรับฟังก์ชันทางคณิตศาสตร์ 
 
 # ------------------ Functions ------------------ #
 def sig_func(x):  # ฟังก์ชัน sigmoid ใช้ในการแปลงค่าอินพุตให้อยู่ในช่วง 0 ถึง 1
@@ -165,7 +165,7 @@ def cross_validation(data, k=10, hidden_units=5, learning_rate=0.01, momentum=0.
         
     avg_mse = sum(mean_squared_error_scores) / len(mean_squared_error_scores)  # คำนวณค่า MSE เฉลี่ยจากทั้งหมด
     print(f"\n\nAVG MSE: {avg_mse:.6f} ")  # แสดงค่า MSE เฉลี่ยจาก k-fold
-    print(f"\n-----------------------------------------------------------------")  # แสดงเส้นแบ่ง
+    print(f"\n-----------------------------------------------------------------")  
 
 # ------------------ Classification ------------------ #
 def load_data(file_path):  # ฟังก์ชันนี้ใช้ในการโหลดข้อมูลจากไฟล์และแปลงเป็นลิสต์ของข้อมูล
@@ -323,40 +323,9 @@ def classification_validation(data, k=10, hidden_units=4, learning_rate=0.01, mo
     # คำนวณค่า Accuracy เฉลี่ยจากทุก fold
     avg_ac = sum((cm[0][0] + cm[1][1]) / sum(sum(row) for row in cm) for cm in all_confusion) / len(all_confusion)
     print(f"\nAVG Accuracy: {avg_ac*100:.2f} % ")  # แสดงค่า Accuracy เฉลี่ย
-    print(f"\n-----------------------------------------------------------------")  # แสดงเส้นแบ่ง
+    print(f"\n-----------------------------------------------------------------")  
 
 # _______แก้ไขค่า run โปรแกรม________ #
-def run_dataset():  # ฟังก์ชันนี้ใช้ในการทดสอบโมเดลด้วยข้อมูลที่โหลดจากไฟล์ "dataset.txt"
-    print("\nTest Predict Flood level :\n")  # แสดงข้อความเพื่อบอกว่ากำลังทดสอบการทำนายระดับน้ำท่วม
-    raw_data = data_from_file("dataset.txt")  # โหลดข้อมูลจากไฟล์ "dataset.txt"
-    normalized_data, _ = normal_dataset(raw_data)  # ปรับข้อมูล (normalize) และแยกข้อมูลออกเป็นอินพุตและเอาต์พุต
-    cross_validation(normalized_data, k=10, hidden_units=5, learning_rate=0.01, momentum=0.9)  # ทำ k-fold cross-validation โดยใช้ข้อมูลที่ถูก normalize
-
-def run_cross():  # ฟังก์ชันนี้ใช้ในการทดสอบความถูกต้องของเครือข่ายด้วยข้อมูลจากไฟล์ "cross.txt"
-    print("\nTest validity of network :")  # แสดงข้อความเพื่อบอกว่ากำลังทดสอบความถูกต้องของเครือข่าย
-    cross_data = load_data("cross.txt")  # โหลดข้อมูลจากไฟล์ "cross.txt"
-    if not cross_data:  # ถ้าโหลดข้อมูลไม่ได้
-        print("Error: Failed to load cross.txt")  # แสดงข้อความแสดงข้อผิดพลาด
-        return  # หยุดการทำงานของฟังก์ชัน
-
-    # กำหนดค่าคอนฟิกูเรชันต่างๆ สำหรับการทดสอบ
-    configurations = [
-        {"hidden_units": 4, "learning_rate": 0.01, "momentum": 0.7},  # คอนฟิกแรก
-        {"hidden_units": 6, "learning_rate": 0.05, "momentum": 0.7},  # คอนฟิกที่สอง
-    ]
-    
-    # ทำการทดสอบด้วยค่าคอนฟิกูเรชันต่างๆ
-    for config in configurations:  # ลูปสำหรับการทดสอบแต่ละคอนฟิก
-        print(f"\nConfig: hidden_units={config['hidden_units']}, learning_rate={config['learning_rate']}, momentum={config['momentum']}")  # แสดงการตั้งค่าที่กำลังทดสอบ
-        # เรียกใช้ฟังก์ชัน classification_validation โดยใช้ข้อมูล cross_data และค่าคอนฟิกูเรชันที่กำหนด
-        classification_validation(
-            cross_data,
-            k=10,
-            hidden_units=config['hidden_units'],
-            learning_rate=config['learning_rate'],
-            momentum=config['momentum']
-        )
-        
 # ฟังก์ชันที่ให้ผู้ใช้เลือกปรับค่า
 def ask_for_input(prompt, default_value):
     user_input = input(f"{prompt} (default {default_value}): ")
@@ -449,6 +418,6 @@ def run_cross():
             momentum=config['momentum']  # ค่ามูลมุม
         )
 
-if __name__ == "__main__":  # ถ้าโปรแกรมนี้ถูกเรียกใช้งานโดยตรง (ไม่ใช่การนำเข้า)
+if __name__ == "__main__":  # ถ้าโปรแกรมนี้ถูกเรียกใช้งานโดยตรง 
     run_dataset()  # เรียกฟังก์ชัน run_dataset เพื่อทดสอบข้อมูลระดับน้ำท่วม
     run_cross()  # เรียกฟังก์ชัน run_cross เพื่อทดสอบความถูกต้องของเครือข่าย
